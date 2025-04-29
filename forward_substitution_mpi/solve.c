@@ -3,19 +3,21 @@
 #include <mpi.h>
 #include <unistd.h>
 
-#define COST_PER_OPERATION 20000000
+#define COST_PER_OPERATION 2000000
 
 const double epsilon = 0.05;
 
 int rank, nprocs;
 volatile double tmp = 0.0;
 
+#ifdef COST_PER_OPERATION
 void slow_operation()
 {
     int i;
     for (i = 0; i < COST_PER_OPERATION; ++ i)
         tmp += 0.1;
 }
+#endif
 
 void forward_substitution_sequential(int n, double *L, double *b, double *x)
 {
@@ -94,7 +96,7 @@ int check_solution(int n, double *L, double *b, double *x)
 
 int main(int argc, char *argv[])
 {
-    int n, r, i, j;
+    int n, i, j;
     double *L, *b, *xseq, *xpipe;
     double start, end, elapsed;
 
@@ -103,13 +105,12 @@ int main(int argc, char *argv[])
     MPI_Comm_size(MPI_COMM_WORLD, &nprocs);
 
     // Get equation size
-    if (argc < 3)
+    if (argc < 2)
     {
-        fprintf(stderr, "./solve <n> <repeats>\n");
+        fprintf(stderr, "./solve <n>\n");
         exit(1);
     }
     n = atoi(argv[1]);
-    r = atoi(argv[2]);
 
     // Prepare equation
     L = (double *) calloc(n * n, sizeof(double));
@@ -130,10 +131,9 @@ int main(int argc, char *argv[])
     if (rank == 0)
     {
         start = MPI_Wtime();
-        for (i = 0; i < r; ++ i)
-            forward_substitution_sequential(n, L, b, xseq);
+        forward_substitution_sequential(n, L, b, xseq);
         end = MPI_Wtime();
-        elapsed = 1e3 * (end - start) / r;
+        elapsed = 1e3 * (end - start);
         printf("sequential: %6.3lf ms\n", elapsed);
         if (check_solution(n, L, b, xseq))
             printf("sequential: correct!\n");
@@ -142,11 +142,11 @@ int main(int argc, char *argv[])
     }
 
     // Pipelined
+    MPI_Barrier(MPI_COMM_WORLD);
     start = MPI_Wtime();
-    for (i = 0; i < r; ++ i)
-        forward_substitution_pipelined(n, L, b, xpipe);
+    forward_substitution_pipelined(n, L, b, xpipe);
     end = MPI_Wtime();
-    elapsed = 1e3 * (end - start) / r;
+    elapsed = 1e3 * (end - start);
     if (rank == (n - 1) % nprocs)
     {
         printf("Pipelined: %6.3lf ms\n", elapsed);
